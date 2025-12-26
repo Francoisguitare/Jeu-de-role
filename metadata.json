@@ -1,0 +1,5 @@
+{
+  "name": "JDR Compagnon",
+  "description": "Une application de gestion de Jeu de Rôle pour MJ et Joueurs. Gestion d'initiative, PV, stats et assistants IA.",
+  "requestFramePermissions": []
+}
