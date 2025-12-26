@@ -23,12 +23,17 @@
               }
             },
             animation: {
-              'fade-in': 'fadeIn 0.3s ease-out'
+              'fade-in': 'fadeIn 0.3s ease-out',
+              'highlight': 'highlightPulse 1.5s ease-out'
             },
             keyframes: {
               fadeIn: {
                 '0%': { opacity: '0', transform: 'translateY(10px)' },
                 '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              highlightPulse: {
+                '0%': { backgroundColor: 'rgba(217, 119, 6, 0.6)', transform: 'scale(1.1)' },
+                '100%': { backgroundColor: 'transparent', transform: 'scale(1)' },
               }
             }
           }
@@ -54,19 +59,35 @@
       ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
       ::-webkit-scrollbar-thumb:hover { background: #475569; }
       
-      .input-std {
+      /* Inputs invisibles qui se révèlent au focus */
+      .input-ghost {
         background-color: transparent;
-        border-bottom: 1px solid #475569;
-        outline: none;
-        transition: border-color 0.2s;
-        color: #e2e8f0;
+        border: 1px solid transparent;
+        border-radius: 0.25rem;
+        transition: all 0.2s;
+        text-align: center;
+        width: 100%;
+        color: inherit;
+        font-family: inherit;
       }
-      .input-std:focus { border-bottom-color: #d97706; }
+      .input-ghost:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+      .input-ghost:focus {
+        background-color: rgba(15, 23, 42, 0.8);
+        border-color: #d97706;
+        outline: none;
+      }
 
       .glass-panel {
         background: rgba(30, 41, 59, 0.95);
         backdrop-filter: blur(8px);
         border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      /* Animation class injectée dynamiquement */
+      .flash-update {
+        animation: highlightPulse 1s ease-out forwards;
       }
     </style>
 </head>
@@ -89,13 +110,18 @@
       const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       // --- Données Initiales ---
-      const CONDITIONS_LIST = ['Empoisonné', 'Étourdi', 'À terre', 'Aveuglé', 'Charmé', 'Béni'];
+      const CONDITIONS_LIST = ['Empoisonné', 'Étourdi', 'À terre', 'Aveuglé', 'Charmé', 'Béni', 'Maudit'];
       
+      // Stats étendues pour un vrai JDR
       const INITIAL_PLAYERS = [
         { 
           id: '1', name: 'Grommash', role: 'Barbare', isNpc: false, 
-          stats: { pv: 45, maxPv: 45, dex: 12, iniBase: 2, iniRoll: 0 }, 
-          notes: 'Rage disponible', conditions: [],
+          level: 3, xp: 1250,
+          stats: { 
+            pv: 45, maxPv: 45, ca: 14, iniBase: 2, iniRoll: 0,
+            str: 18, dex: 14, con: 16, int: 8, wis: 10, cha: 12
+          }, 
+          notes: 'Rage disponible (2/jour)', conditions: [],
           skills: ['Athlétisme', 'Intimidation'],
           inventory: [
             { id: 'i1', name: 'Hache à deux mains', type: 'weapon', qty: 1 },
@@ -104,8 +130,12 @@
         },
         { 
           id: '2', name: 'Elara', role: 'Mage', isNpc: false, 
-          stats: { pv: 22, maxPv: 22, dex: 16, iniBase: 4, iniRoll: 0 }, 
-          notes: 'Sorts niv 2', conditions: [],
+          level: 3, xp: 1300,
+          stats: { 
+            pv: 22, maxPv: 22, ca: 11, iniBase: 4, iniRoll: 0,
+            str: 8, dex: 16, con: 12, int: 18, wis: 14, cha: 10
+          }, 
+          notes: 'Sorts niv 2 débloqués', conditions: [],
           skills: ['Arcanes', 'Histoire'],
           inventory: [
             { id: 'i3', name: 'Bâton runique', type: 'weapon', qty: 1 },
@@ -114,8 +144,12 @@
         },
         { 
           id: '3', name: 'Gobelin Chef', role: 'Monstre', isNpc: true, 
-          stats: { pv: 15, maxPv: 15, dex: 14, iniBase: 3, iniRoll: 0 }, 
-          notes: 'Lâche', conditions: [],
+          level: 2, xp: 400,
+          stats: { 
+            pv: 15, maxPv: 15, ca: 13, iniBase: 3, iniRoll: 0,
+            str: 10, dex: 14, con: 10, int: 10, wis: 8, cha: 8
+          }, 
+          notes: 'Lâche, fuit si PV < 5', conditions: [],
           skills: ['Discrétion'],
           inventory: [
             { id: 'i5', name: 'Dague rouillée', type: 'weapon', qty: 1 }
@@ -127,12 +161,13 @@
       let state = {
         players: [...INITIAL_PLAYERS],
         viewMode: 'GM', // 'GM' | 'PLAYER_SELECT' | 'PLAYER_FOCUS'
-        selectedPlayerId: null, // Pour la vue joueur focus
-        editingPlayerId: null, // Pour la modale GM
+        selectedPlayerId: null,
+        editingPlayerId: null,
+        lastUpdated: { id: null, field: null, time: 0 }, // Pour l'animation
         isGenerating: false,
         isChatOpen: true,
         chatMessages: [
-          { role: 'system', text: 'Bienvenue, Maître du Jeu. Je suis votre assistant. Demandez-moi de générer du butin, des PNJ ou des descriptions.' }
+          { role: 'system', text: 'Bienvenue. Cliquez sur les statistiques pour les éditer directement.' }
         ],
         chatInput: ''
       };
@@ -140,12 +175,10 @@
       // --- Services Gemini ---
       async function askAI(prompt) {
         if (!API_KEY) return addChatMessage('system', "Clé API manquante.");
-        
         addChatMessage('user', prompt);
         updateState({ isGenerating: true });
-
         try {
-          const context = `Contexte JDR: ${state.players.map(p => `${p.name} (${p.role})`).join(', ')}.`;
+          const context = `Contexte JDR: ${state.players.map(p => `${p.name} (Niv ${p.level} ${p.role})`).join(', ')}.`;
           const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: `${context} \n ${prompt}`,
@@ -153,15 +186,27 @@
           });
           addChatMessage('ai', response.text);
         } catch (e) {
-          console.error(e);
-          addChatMessage('system', "L'oracle est confus (Erreur API).");
+          addChatMessage('system', "Erreur API.");
         }
         updateState({ isGenerating: false });
       }
 
       function addChatMessage(role, text) {
         state.chatMessages = [...state.chatMessages, { role, text, time: new Date() }];
-        renderChat(); // Re-render chat only for performance
+        
+        // Optimisation: mise à jour ciblée pour éviter le re-render complet qui fait perdre le focus
+        const chatWrapper = document.getElementById('chat-container-wrapper');
+        if (chatWrapper) {
+            chatWrapper.innerHTML = renderChat();
+            lucide.createIcons();
+            // Restore focus if sending a message
+            if (role === 'user') {
+                const input = document.getElementById('chat-input');
+                if (input) input.focus();
+            }
+        } else {
+            render();
+        }
         scrollToBottom();
       }
 
@@ -171,23 +216,28 @@
       }
 
       async function generateNpc() {
-        // ... (Code existant simplifié pour brièveté, mais fonctionnel)
         if (!API_KEY) { alert("API Key manquante"); return; }
         updateState({ isGenerating: true });
         try {
            const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Génère un PNJ fantasy JSON: name, role, stats(maxPv, dex, iniBase).`,
+            contents: `Génère un PNJ fantasy JSON avec stats D&D 5e: name, role, level, stats(maxPv, ca, str, dex, con, int, wis, cha, iniBase).`,
             config: { responseMimeType: "application/json" }
           });
           const npcData = JSON.parse(response.text);
           if (npcData.name) {
              addPlayer({
                 id: crypto.randomUUID(), name: npcData.name, role: npcData.role || 'PNJ', isNpc: true,
-                stats: { pv: npcData.stats?.maxPv||10, maxPv: npcData.stats?.maxPv||10, dex: npcData.stats?.dex||10, iniBase: npcData.stats?.iniBase||0, iniRoll: 0 },
+                level: npcData.level || 1, xp: 0,
+                stats: { 
+                    pv: npcData.stats?.maxPv||10, maxPv: npcData.stats?.maxPv||10, 
+                    ca: npcData.stats?.ca||10, iniBase: npcData.stats?.iniBase||0, iniRoll: 0,
+                    str: npcData.stats?.str||10, dex: npcData.stats?.dex||10, con: npcData.stats?.con||10,
+                    int: npcData.stats?.int||10, wis: npcData.stats?.wis||10, cha: npcData.stats?.cha||10
+                },
                 notes: '', conditions: [], skills: [], inventory: []
              });
-             addChatMessage('system', `Nouveau PNJ généré: ${npcData.name}`);
+             addChatMessage('system', `Nouveau PNJ invoqué: ${npcData.name}`);
           }
         } catch(e) { console.error(e); }
         updateState({ isGenerating: false });
@@ -204,12 +254,12 @@
         const app = document.getElementById('app');
         
         const header = `
-          <header class="flex-none bg-slate-900 border-b border-slate-700 p-4 flex justify-between items-center shadow-md z-20">
+          <header class="flex-none bg-slate-900 border-b border-slate-700 p-3 flex justify-between items-center shadow-md z-20">
             <div class="flex items-center gap-3">
                 <div class="bg-fantasy-gold p-2 rounded-lg shadow-lg shadow-amber-500/20">
                     <i data-lucide="sword" class="text-white w-5 h-5"></i>
                 </div>
-                <h1 class="text-xl md:text-2xl font-extrabold tracking-tight text-white hidden md:block">
+                <h1 class="text-xl font-extrabold tracking-tight text-white hidden md:block">
                     JDR <span class="text-fantasy-gold">Compagnon</span>
                 </h1>
             </div>
@@ -234,7 +284,6 @@
           </header>
         `;
 
-        // Corps principal
         let mainContent = '';
         if (state.viewMode === 'GM') {
             mainContent = renderGMView();
@@ -250,191 +299,20 @@
             <main class="flex-1 overflow-y-auto p-4 md:p-8 relative">
                ${mainContent}
             </main>
-            
-            <!-- Chat Panel -->
             <aside class="${state.isChatOpen ? 'w-80 translate-x-0' : 'w-0 translate-x-full'} transition-all duration-300 bg-slate-900 border-l border-slate-700 flex flex-col absolute right-0 top-0 bottom-0 z-30 shadow-2xl md:relative md:transform-none">
-               ${renderChat()}
+               <div id="chat-container-wrapper" class="h-full">
+                 ${renderChat()}
+               </div>
             </aside>
           </div>
         `;
 
         renderModal();
         lucide.createIcons();
-        
-        // Restore focus if typing in chat
-        if(document.activeElement?.id === 'chat-input') {
-             document.getElementById('chat-input').focus();
-        }
+        if(document.activeElement?.id === 'chat-input') document.getElementById('chat-input').focus();
       }
 
       // --- Vues ---
-
-      function renderGMView() {
-        return `
-          <div class="space-y-6 max-w-6xl mx-auto animate-fade-in pb-20">
-            <!-- Toolbar -->
-            <div class="flex flex-wrap gap-4 items-center justify-between bg-fantasy-panel p-4 rounded-lg border border-slate-700 shadow-sm">
-                <div class="flex gap-2 w-full md:w-auto">
-                  <input type="text" id="newPlayerInput" placeholder="Nouveau personnage..." class="bg-slate-800 border border-slate-600 text-white px-3 py-2 rounded text-sm focus:border-fantasy-gold outline-none flex-1">
-                  <button onclick="window.appActions.addManualPlayer()" class="bg-fantasy-gold text-white hover:bg-yellow-600 px-3 py-2 rounded shadow-md"><i data-lucide="plus" class="w-4 h-4"></i></button>
-                  <button onclick="window.appActions.createNpc()" class="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded shadow-md flex items-center gap-1 text-xs font-bold uppercase"><i data-lucide="wand-2" class="w-4 h-4"></i> PNJ IA</button>
-                </div>
-                <button onclick="window.appActions.sortInitiative()" class="bg-slate-700 text-slate-200 hover:bg-slate-600 px-4 py-2 rounded text-sm font-medium shadow-md border border-slate-600 flex items-center gap-2">
-                   <i data-lucide="arrow-down-narrow-wide" class="w-4 h-4"></i> Trier Initiative
-                </button>
-            </div>
-
-            <!-- Table -->
-            <div class="overflow-x-auto bg-fantasy-panel rounded-lg shadow-xl border border-slate-700">
-                <table class="w-full text-left text-sm whitespace-nowrap">
-                  <thead class="bg-slate-800 text-slate-400 uppercase font-bold text-xs">
-                    <tr>
-                      <th class="p-4 w-12 text-center">Ini</th>
-                      <th class="p-4">Héros</th>
-                      <th class="p-4 text-center">Santé (PV)</th>
-                      <th class="p-4 text-center">Défense/Dex</th>
-                      <th class="p-4">États</th>
-                      <th class="p-4 text-right">Gestion</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-700">
-                    ${state.players.map((p, idx) => renderGMRow(p, idx)).join('')}
-                  </tbody>
-                </table>
-            </div>
-          </div>
-        `;
-      }
-
-      function renderGMRow(player, index) {
-        const isDead = player.stats.pv <= 0;
-        return `
-          <tr class="hover:bg-slate-700/50 transition-colors ${isDead ? 'opacity-50 grayscale' : ''}">
-            <td class="p-3 text-center">
-               <div class="flex items-center justify-center gap-1">
-                 <input type="number" value="${player.stats.iniRoll}" onchange="window.appActions.updateStat('${player.id}', 'iniRoll', parseInt(this.value))" class="w-10 text-center bg-slate-900 border border-slate-600 rounded py-1 text-fantasy-gold font-bold">
-                 <span class="text-xs text-slate-500">+ ${player.stats.iniBase}</span>
-               </div>
-            </td>
-            <td class="p-3">
-               <input value="${player.name}" onchange="window.appActions.updatePlayer('${player.id}', 'name', this.value)" class="input-std font-bold block w-full text-slate-200">
-               <input value="${player.role}" onchange="window.appActions.updatePlayer('${player.id}', 'role', this.value)" class="input-std text-xs text-slate-400 block w-full mt-1">
-            </td>
-            <td class="p-3 text-center">
-              <div class="flex items-center justify-center gap-1 bg-slate-900/50 rounded-full px-2 py-1 border border-slate-700 inline-flex">
-                 <button onclick="window.appActions.updateStat('${player.id}', 'pv', ${player.stats.pv - 1})" class="text-red-400 hover:text-red-300 p-1"><i data-lucide="minus" class="w-3 h-3"></i></button>
-                 <span class="font-mono font-bold w-8 text-right ${player.stats.pv < player.stats.maxPv/2 ? 'text-red-500' : 'text-green-400'}">${player.stats.pv}</span>
-                 <span class="text-slate-500 text-xs">/</span>
-                 <input type="number" value="${player.stats.maxPv}" onchange="window.appActions.updateStat('${player.id}', 'maxPv', parseInt(this.value))" class="w-8 bg-transparent text-slate-500 text-xs outline-none">
-                 <button onclick="window.appActions.updateStat('${player.id}', 'pv', ${player.stats.pv + 1})" class="text-green-400 hover:text-green-300 p-1"><i data-lucide="plus" class="w-3 h-3"></i></button>
-              </div>
-            </td>
-            <td class="p-3 text-center">
-               <input type="number" value="${player.stats.dex}" onchange="window.appActions.updateStat('${player.id}', 'dex', parseInt(this.value))" class="w-12 text-center bg-transparent border-b border-slate-700 text-slate-300">
-            </td>
-            <td class="p-3">
-               <div class="flex flex-wrap gap-1 mb-1 max-w-[200px]">
-                 ${player.conditions.map(c => `
-                   <span class="text-[10px] bg-slate-800 text-red-300 px-2 py-0.5 rounded-full border border-red-900/50 cursor-pointer hover:bg-red-900" onclick="window.appActions.removeCondition('${player.id}', '${c}')">
-                     ${c}
-                   </span>
-                 `).join('')}
-               </div>
-               <select onchange="window.appActions.addCondition('${player.id}', this.value)" class="bg-transparent text-xs text-slate-500 outline-none w-20 hover:text-slate-300">
-                 <option value="">+ État</option>
-                 ${CONDITIONS_LIST.map(c => `<option value="${c}">${c}</option>`).join('')}
-               </select>
-            </td>
-            <td class="p-3 text-right">
-              <button onclick="window.appActions.editPlayer('${player.id}')" class="text-fantasy-gold hover:text-white mr-2 p-2 hover:bg-slate-700 rounded"><i data-lucide="settings-2" class="w-4 h-4"></i></button>
-              <button onclick="window.appActions.removePlayer('${player.id}')" class="text-slate-600 hover:text-red-500 p-2 hover:bg-slate-700 rounded"><i data-lucide="trash" class="w-4 h-4"></i></button>
-            </td>
-          </tr>
-        `;
-      }
-
-      function renderPlayerSelect() {
-        return `
-          <div class="flex flex-col items-center justify-center h-full animate-fade-in">
-             <h2 class="text-3xl font-bold text-white mb-8">Qui incarnez-vous ?</h2>
-             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 max-w-4xl w-full px-4">
-               ${state.players.filter(p => !p.isNpc).map(p => `
-                 <button onclick="window.appActions.selectPlayer('${p.id}')" class="group relative bg-fantasy-panel border-2 border-slate-700 hover:border-fantasy-gold rounded-xl p-8 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-fantasy-gold/20 text-left">
-                    <h3 class="text-2xl font-bold text-white group-hover:text-fantasy-gold">${p.name}</h3>
-                    <p class="text-slate-400">${p.role}</p>
-                    <div class="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <i data-lucide="arrow-right" class="w-6 h-6 text-fantasy-gold"></i>
-                    </div>
-                 </button>
-               `).join('')}
-             </div>
-             <p class="mt-8 text-slate-500 text-sm">Sélectionnez votre fiche pour accéder à la vue simplifiée.</p>
-          </div>
-        `;
-      }
-
-      function renderPlayerFocus() {
-        const player = state.players.find(p => p.id === state.selectedPlayerId);
-        if (!player) return `<div class="text-center mt-20">Joueur introuvable <button onclick="window.appActions.setView('PLAYER_SELECT')">Retour</button></div>`;
-        
-        const hpPercent = (player.stats.pv / player.stats.maxPv) * 100;
-
-        return `
-          <div class="max-w-md mx-auto h-full flex flex-col gap-6 animate-fade-in pb-10">
-             <button onclick="window.appActions.setView('PLAYER_SELECT')" class="text-slate-500 hover:text-white flex items-center gap-2 text-sm uppercase font-bold tracking-widest mb-4">
-                <i data-lucide="arrow-left" class="w-4 h-4"></i> Changer de perso
-             </button>
-
-             <!-- Header Carte -->
-             <div class="text-center space-y-2">
-                <h2 class="text-4xl font-extrabold text-white tracking-tight">${player.name}</h2>
-                <p class="text-fantasy-gold uppercase tracking-widest text-sm font-semibold">${player.role}</p>
-             </div>
-
-             <!-- Big PV -->
-             <div class="glass-panel p-8 rounded-2xl shadow-2xl relative overflow-hidden border-t-4 ${hpPercent < 30 ? 'border-red-500' : 'border-green-500'}">
-                <div class="flex justify-between items-end mb-4 relative z-10">
-                   <span class="text-slate-400 font-bold text-sm uppercase">Points de Vie</span>
-                   <span class="text-5xl font-black text-white">${player.stats.pv} <span class="text-lg text-slate-500 font-normal">/ ${player.stats.maxPv}</span></span>
-                </div>
-                
-                <div class="h-4 bg-slate-900 rounded-full overflow-hidden mb-6 border border-slate-700">
-                    <div class="h-full transition-all duration-700 ${hpPercent < 30 ? 'bg-red-500' : 'bg-green-500'}" style="width: ${hpPercent}%"></div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <button onclick="window.appActions.updateStat('${player.id}', 'pv', ${player.stats.pv - 1})" class="bg-slate-800 hover:bg-red-900/50 border border-slate-700 text-red-400 py-3 rounded-lg font-bold text-xl flex items-center justify-center transition-colors">
-                        -1 PV
-                    </button>
-                     <!-- Note: Player can't heal themselves easily in this view, meant to be succinct. GM handles heals or items usage -->
-                    <div class="text-center flex flex-col justify-center bg-slate-800/50 rounded-lg border border-slate-700/50">
-                        <span class="text-xs text-slate-400 uppercase">État</span>
-                        <span class="font-bold ${player.conditions.length ? 'text-red-400' : 'text-green-400'}">${player.conditions.length > 0 ? player.conditions[0] : 'Sain'}</span>
-                    </div>
-                </div>
-             </div>
-
-             <!-- Inventaire Succinct -->
-             <div class="bg-fantasy-panel rounded-xl border border-slate-700 p-4 flex-1">
-                <h3 class="text-slate-400 text-xs font-bold uppercase mb-4 flex items-center gap-2"><i data-lucide="backpack" class="w-4 h-4"></i> Équipement Rapide</h3>
-                <ul class="space-y-3">
-                   ${player.inventory.length === 0 ? '<li class="text-slate-600 italic text-sm text-center py-4">Sac vide...</li>' : ''}
-                   ${player.inventory.map(item => `
-                     <li class="flex justify-between items-center text-slate-300 border-b border-slate-800 pb-2 last:border-0">
-                        <div class="flex items-center gap-3">
-                            <div class="bg-slate-800 p-2 rounded text-slate-500">
-                                <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-4 h-4"></i>
-                            </div>
-                            <span>${item.name}</span>
-                        </div>
-                        <span class="font-mono text-fantasy-gold font-bold">x${item.qty}</span>
-                     </li>
-                   `).join('')}
-                </ul>
-             </div>
-          </div>
-        `;
-      }
 
       function renderChat() {
         const messagesHtml = state.chatMessages.map(msg => `
@@ -456,15 +334,209 @@
                     <h3 class="font-bold text-slate-200 flex items-center gap-2 text-sm"><i data-lucide="scroll" class="w-4 h-4"></i> Journal & Oracle</h3>
                     <button onclick="window.appActions.toggleChat()" class="md:hidden text-slate-400"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
-                <div id="chat-body" class="flex-1 overflow-y-auto p-4 bg-slate-900/50">
+                <div id="chat-body" class="flex-1 overflow-y-auto p-4 bg-slate-900/50 custom-scrollbar">
                     ${messagesHtml}
-                    ${state.isGenerating ? '<div class="text-xs text-fantasy-gold animate-pulse">L\'oracle réfléchit...</div>' : ''}
+                    ${state.isGenerating ? '<div class="text-xs text-fantasy-gold animate-pulse p-2">L\'oracle réfléchit...</div>' : ''}
                 </div>
                 <form onsubmit="window.appActions.sendChat(event)" class="p-3 bg-slate-800 border-t border-slate-700 flex gap-2">
-                    <input id="chat-input" autocomplete="off" placeholder="Noter un truc ou demander à l'IA..." class="flex-1 bg-slate-900 border border-slate-600 text-white text-sm rounded px-3 py-2 outline-none focus:border-fantasy-gold placeholder-slate-600">
+                    <input id="chat-input" autocomplete="off" placeholder="Noter ou demander à l'IA..." class="flex-1 bg-slate-900 border border-slate-600 text-white text-sm rounded px-3 py-2 outline-none focus:border-fantasy-gold placeholder-slate-600">
                     <button type="submit" class="bg-fantasy-gold text-white p-2 rounded hover:bg-yellow-600 transition-colors"><i data-lucide="send" class="w-4 h-4"></i></button>
                 </form>
             </div>
+        `;
+      }
+
+      function renderGMView() {
+        return `
+          <div class="space-y-6 max-w-7xl mx-auto animate-fade-in pb-20">
+            <div class="flex flex-wrap gap-4 items-center justify-between bg-fantasy-panel p-4 rounded-lg border border-slate-700 shadow-sm">
+                <div class="flex gap-2 w-full md:w-auto">
+                  <button onclick="window.appActions.addManualPlayer()" class="bg-fantasy-gold text-white hover:bg-yellow-600 px-3 py-2 rounded shadow-md text-sm font-bold flex items-center gap-2"><i data-lucide="plus" class="w-4 h-4"></i> Nouveau Perso</button>
+                  <button onclick="window.appActions.createNpc()" class="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded shadow-md flex items-center gap-1 text-xs font-bold uppercase"><i data-lucide="wand-2" class="w-4 h-4"></i> PNJ IA</button>
+                </div>
+                <button onclick="window.appActions.sortInitiative()" class="bg-slate-700 text-slate-200 hover:bg-slate-600 px-4 py-2 rounded text-sm font-medium shadow-md border border-slate-600 flex items-center gap-2">
+                   <i data-lucide="arrow-down-narrow-wide" class="w-4 h-4"></i> Initiative
+                </button>
+            </div>
+
+            <div class="overflow-x-auto bg-fantasy-panel rounded-lg shadow-xl border border-slate-700">
+                <table class="w-full text-left text-sm whitespace-nowrap">
+                  <thead class="bg-slate-800 text-slate-400 uppercase font-bold text-xs">
+                    <tr>
+                      <th class="p-4 w-12 text-center">Ini</th>
+                      <th class="p-4">Héros</th>
+                      <th class="p-4 text-center">Niv / XP</th>
+                      <th class="p-4 text-center">Santé (PV)</th>
+                      <th class="p-4 text-center">CA / DEX</th>
+                      <th class="p-4">États</th>
+                      <th class="p-4 text-right">Fiche</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-700">
+                    ${state.players.map((p, idx) => renderGMRow(p, idx)).join('')}
+                  </tbody>
+                </table>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderGMRow(player, index) {
+        const isDead = player.stats.pv <= 0;
+        return `
+          <tr class="hover:bg-slate-700/50 transition-colors ${isDead ? 'opacity-50 grayscale' : ''}">
+            <td class="p-3 text-center">
+               <div class="flex items-center justify-center gap-1">
+                 <input type="number" value="${player.stats.iniRoll}" onchange="window.appActions.updateStat('${player.id}', 'iniRoll', parseInt(this.value))" class="input-ghost w-10 text-fantasy-gold font-bold bg-slate-900 border border-slate-700">
+                 <span class="text-xs text-slate-500">+ ${player.stats.iniBase}</span>
+               </div>
+            </td>
+            <td class="p-3">
+               <input value="${player.name}" onchange="window.appActions.updatePlayer('${player.id}', 'name', this.value)" class="input-ghost font-bold block w-full text-left text-slate-200">
+               <input value="${player.role}" onchange="window.appActions.updatePlayer('${player.id}', 'role', this.value)" class="input-ghost text-xs text-slate-400 block w-full text-left mt-1">
+            </td>
+            <td class="p-3 text-center">
+                <div class="flex items-center justify-center gap-1">
+                    <span class="text-xs text-slate-500">Niv</span>
+                    <input type="number" value="${player.level}" onchange="window.appActions.updatePlayer('${player.id}', 'level', parseInt(this.value))" class="input-ghost w-8 font-bold text-white">
+                </div>
+                <div class="flex items-center justify-center gap-1 mt-1">
+                    <input type="number" value="${player.xp}" onchange="window.appActions.updatePlayer('${player.id}', 'xp', parseInt(this.value))" class="input-ghost w-16 text-xs text-fantasy-gold">
+                    <span class="text-[10px] text-slate-500">XP</span>
+                </div>
+            </td>
+            <td class="p-3 text-center">
+              <div class="flex items-center justify-center gap-1 bg-slate-900/50 rounded-full px-2 py-1 border border-slate-700 inline-flex">
+                 <button onclick="window.appActions.updateStat('${player.id}', 'pv', ${player.stats.pv - 1})" class="text-red-400 hover:text-red-300 p-1"><i data-lucide="minus" class="w-3 h-3"></i></button>
+                 <span class="font-mono font-bold w-8 text-right ${player.stats.pv < player.stats.maxPv/2 ? 'text-red-500' : 'text-green-400'}">${player.stats.pv}</span>
+                 <span class="text-slate-500 text-xs">/</span>
+                 <input type="number" value="${player.stats.maxPv}" onchange="window.appActions.updateStat('${player.id}', 'maxPv', parseInt(this.value))" class="input-ghost w-8 text-slate-500 text-xs">
+                 <button onclick="window.appActions.updateStat('${player.id}', 'pv', ${player.stats.pv + 1})" class="text-green-400 hover:text-green-300 p-1"><i data-lucide="plus" class="w-3 h-3"></i></button>
+              </div>
+            </td>
+            <td class="p-3 text-center">
+               <div class="flex gap-2 justify-center text-xs">
+                 <div class="flex flex-col items-center">
+                    <span class="text-[10px] text-slate-500">CA</span>
+                    <input type="number" value="${player.stats.ca}" onchange="window.appActions.updateStat('${player.id}', 'ca', parseInt(this.value))" class="input-ghost w-8 text-slate-300 font-bold bg-slate-800 rounded">
+                 </div>
+                 <div class="flex flex-col items-center">
+                    <span class="text-[10px] text-slate-500">DEX</span>
+                    <input type="number" value="${player.stats.dex}" onchange="window.appActions.updateStat('${player.id}', 'dex', parseInt(this.value))" class="input-ghost w-8 text-slate-400">
+                 </div>
+               </div>
+            </td>
+            <td class="p-3">
+               <div class="flex flex-wrap gap-1 mb-1 max-w-[150px]">
+                 ${player.conditions.map(c => `
+                   <span class="text-[10px] bg-slate-800 text-red-300 px-2 py-0.5 rounded-full border border-red-900/50 cursor-pointer hover:bg-red-900" onclick="window.appActions.removeCondition('${player.id}', '${c}')">
+                     ${c}
+                   </span>
+                 `).join('')}
+               </div>
+               <select onchange="window.appActions.addCondition('${player.id}', this.value)" class="bg-transparent text-xs text-slate-500 outline-none w-20 hover:text-slate-300">
+                 <option value="">+ État</option>
+                 ${CONDITIONS_LIST.map(c => `<option value="${c}">${c}</option>`).join('')}
+               </select>
+            </td>
+            <td class="p-3 text-right">
+              <button onclick="window.appActions.editPlayer('${player.id}')" class="bg-slate-700 hover:bg-fantasy-gold text-white px-3 py-1 rounded text-xs font-bold transition-colors">
+                 <i data-lucide="scroll-text" class="w-4 h-4 inline mr-1"></i> Fiche
+              </button>
+            </td>
+          </tr>
+        `;
+      }
+
+      function renderPlayerSelect() {
+        return `
+          <div class="flex flex-col items-center justify-center h-full animate-fade-in">
+             <h2 class="text-3xl font-bold text-white mb-8">Qui incarnez-vous ?</h2>
+             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 max-w-4xl w-full px-4">
+               ${state.players.filter(p => !p.isNpc).map(p => `
+                 <button onclick="window.appActions.selectPlayer('${p.id}')" class="group relative bg-fantasy-panel border-2 border-slate-700 hover:border-fantasy-gold rounded-xl p-8 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-fantasy-gold/20 text-left">
+                    <h3 class="text-2xl font-bold text-white group-hover:text-fantasy-gold">${p.name}</h3>
+                    <p class="text-slate-400">${p.role} - Niv ${p.level}</p>
+                    <div class="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i data-lucide="arrow-right" class="w-6 h-6 text-fantasy-gold"></i>
+                    </div>
+                 </button>
+               `).join('')}
+             </div>
+          </div>
+        `;
+      }
+
+      function renderPlayerFocus() {
+        const player = state.players.find(p => p.id === state.selectedPlayerId);
+        if (!player) return `<div class="text-center mt-20">Joueur introuvable <button onclick="window.appActions.setView('PLAYER_SELECT')">Retour</button></div>`;
+        
+        const hpPercent = (player.stats.pv / player.stats.maxPv) * 100;
+
+        // Helper pour l'animation flash
+        const isUpdated = (field) => state.lastUpdated.id === player.id && state.lastUpdated.field === field ? 'flash-update' : '';
+
+        return `
+          <div class="max-w-md mx-auto h-full flex flex-col gap-6 animate-fade-in pb-10">
+             <button onclick="window.appActions.setView('PLAYER_SELECT')" class="text-slate-500 hover:text-white flex items-center gap-2 text-sm uppercase font-bold tracking-widest mb-4">
+                <i data-lucide="arrow-left" class="w-4 h-4"></i> Retour
+             </button>
+
+             <!-- Header Carte -->
+             <div class="text-center space-y-2">
+                <h2 class="text-4xl font-extrabold text-white tracking-tight ${isUpdated('name')}">${player.name}</h2>
+                <div class="flex justify-center gap-4 text-sm font-semibold uppercase tracking-widest text-fantasy-gold">
+                    <span>${player.role}</span>
+                    <span class="${isUpdated('level')}">Niv ${player.level}</span>
+                    <span class="text-slate-500 ${isUpdated('xp')}">${player.xp} XP</span>
+                </div>
+             </div>
+
+             <!-- Big PV -->
+             <div class="glass-panel p-8 rounded-2xl shadow-2xl relative overflow-hidden border-t-4 ${hpPercent < 30 ? 'border-red-500' : 'border-green-500'} ${isUpdated('pv')}">
+                <div class="flex justify-between items-end mb-4 relative z-10">
+                   <span class="text-slate-400 font-bold text-sm uppercase">Points de Vie</span>
+                   <span class="text-5xl font-black text-white">${player.stats.pv} <span class="text-lg text-slate-500 font-normal">/ ${player.stats.maxPv}</span></span>
+                </div>
+                <div class="h-4 bg-slate-900 rounded-full overflow-hidden mb-6 border border-slate-700">
+                    <div class="h-full transition-all duration-700 ${hpPercent < 30 ? 'bg-red-500' : 'bg-green-500'}" style="width: ${hpPercent}%"></div>
+                </div>
+                <div class="flex justify-between text-center gap-4">
+                     <div class="bg-slate-800/50 p-2 rounded flex-1 ${isUpdated('ca')}">
+                        <div class="text-xs text-slate-500 uppercase">CA</div>
+                        <div class="font-bold text-xl text-white">${player.stats.ca}</div>
+                     </div>
+                     <div class="bg-slate-800/50 p-2 rounded flex-1 ${isUpdated('iniRoll')}">
+                        <div class="text-xs text-slate-500 uppercase">Ini Total</div>
+                        <div class="font-bold text-xl text-fantasy-gold">${player.stats.iniBase + player.stats.iniRoll}</div>
+                     </div>
+                </div>
+             </div>
+
+             <!-- Caractéristiques Grid -->
+             <div class="grid grid-cols-3 gap-3">
+                ${['str', 'dex', 'con', 'int', 'wis', 'cha'].map(stat => `
+                    <div class="bg-fantasy-panel border border-slate-700 rounded p-2 text-center ${isUpdated(stat)}">
+                        <div class="text-[10px] text-slate-500 uppercase mb-1">${stat.toUpperCase()}</div>
+                        <div class="text-lg font-bold text-white">${player.stats[stat]}</div>
+                    </div>
+                `).join('')}
+             </div>
+
+             <!-- Inventaire Succinct -->
+             <div class="bg-fantasy-panel rounded-xl border border-slate-700 p-4 flex-1">
+                <h3 class="text-slate-400 text-xs font-bold uppercase mb-4 flex items-center gap-2"><i data-lucide="backpack" class="w-4 h-4"></i> Inventaire</h3>
+                <ul class="space-y-3">
+                   ${player.inventory.length === 0 ? '<li class="text-slate-600 italic text-sm text-center py-4">Sac vide...</li>' : ''}
+                   ${player.inventory.map(item => `
+                     <li class="flex justify-between items-center text-slate-300 border-b border-slate-800 pb-2 last:border-0">
+                        <span>${item.name}</span>
+                        <span class="font-mono text-fantasy-gold font-bold">x${item.qty}</span>
+                     </li>
+                   `).join('')}
+                </ul>
+             </div>
+          </div>
         `;
       }
 
@@ -478,73 +550,115 @@
         const player = state.players.find(p => p.id === state.editingPlayerId);
         if (!player) return;
 
+        // Fonction helper pour les inputs de stats
+        const statInput = (label, key) => `
+            <div class="bg-slate-900 p-2 rounded border border-slate-700 flex flex-col items-center">
+                <label class="text-[10px] text-slate-500 uppercase font-bold mb-1">${label}</label>
+                <input type="number" value="${player.stats[key]}" 
+                    onchange="window.appActions.updateStat('${player.id}', '${key}', parseInt(this.value))" 
+                    class="input-ghost text-xl font-bold text-white w-full">
+            </div>
+        `;
+
         container.innerHTML = `
           <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-             <div class="bg-fantasy-panel w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-xl border border-slate-600 shadow-2xl flex flex-col">
-                <!-- Header -->
-                <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800">
-                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                        <i data-lucide="settings-2" class="w-5 h-5 text-fantasy-gold"></i> 
-                        Gestion: ${player.name}
-                    </h2>
-                    <button onclick="window.appActions.closeModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button>
+             <div class="bg-fantasy-panel w-full max-w-4xl max-h-[95vh] overflow-hidden rounded-xl border border-slate-600 shadow-2xl flex flex-col">
+                <!-- Header: Identité -->
+                <div class="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-start">
+                    <div class="flex-1 mr-8">
+                        <input value="${player.name}" onchange="window.appActions.updatePlayer('${player.id}', 'name', this.value)" class="input-ghost text-3xl font-extrabold text-white text-left w-full mb-1">
+                        <div class="flex gap-4">
+                            <input value="${player.role}" onchange="window.appActions.updatePlayer('${player.id}', 'role', this.value)" class="input-ghost text-sm text-fantasy-gold text-left w-1/3">
+                            <div class="flex items-center gap-2 text-sm text-slate-400">
+                                <span>Niv</span>
+                                <input type="number" value="${player.level}" onchange="window.appActions.updatePlayer('${player.id}', 'level', parseInt(this.value))" class="input-ghost w-10 text-white font-bold border-b border-slate-600">
+                                <span>XP</span>
+                                <input type="number" value="${player.xp}" onchange="window.appActions.updatePlayer('${player.id}', 'xp', parseInt(this.value))" class="input-ghost w-16 text-white border-b border-slate-600">
+                            </div>
+                        </div>
+                    </div>
+                    <button onclick="window.appActions.closeModal()" class="text-slate-400 hover:text-white p-2 bg-slate-700 rounded-full"><i data-lucide="x" class="w-6 h-6"></i></button>
                 </div>
 
-                <!-- Body (Scrollable) -->
-                <div class="p-6 overflow-y-auto space-y-8 custom-scrollbar">
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
                     
-                    <!-- Section Inventaire -->
-                    <div>
-                        <h3 class="text-sm font-bold text-fantasy-gold uppercase tracking-widest mb-3 border-b border-slate-700 pb-1">Inventaire</h3>
-                        <div class="space-y-2 mb-4">
-                            ${player.inventory.map(item => `
-                                <div class="flex items-center justify-between bg-slate-900/50 p-2 rounded border border-slate-700/50">
-                                    <div class="flex items-center gap-2">
-                                        <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-4 h-4 text-slate-500"></i>
-                                        <span class="text-slate-200">${item.name}</span>
-                                    </div>
-                                    <div class="flex items-center gap-3">
-                                        <div class="flex items-center bg-slate-800 rounded">
-                                            <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', -1)" class="px-2 text-slate-400 hover:text-white">-</button>
-                                            <span class="w-6 text-center text-sm font-mono">${item.qty}</span>
-                                            <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', 1)" class="px-2 text-slate-400 hover:text-white">+</button>
+                    <!-- Colonne Gauche: Stats Combat -->
+                    <div class="space-y-6">
+                        <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2">Caractéristiques & Combat</h3>
+                        
+                        <!-- Main Stats Grid -->
+                        <div class="grid grid-cols-3 gap-3">
+                            ${statInput('Force', 'str')}
+                            ${statInput('Dextérité', 'dex')}
+                            ${statInput('Constit.', 'con')}
+                            ${statInput('Intell.', 'int')}
+                            ${statInput('Sagesse', 'wis')}
+                            ${statInput('Charisme', 'cha')}
+                        </div>
+
+                        <!-- Secondary Stats -->
+                        <div class="grid grid-cols-3 gap-3 pt-4">
+                            ${statInput('CA (Armure)', 'ca')}
+                            ${statInput('Ini. Base', 'iniBase')}
+                            <div class="bg-slate-900 p-2 rounded border border-slate-700 flex flex-col items-center relative overflow-hidden">
+                                <label class="text-[10px] text-slate-500 uppercase font-bold mb-1">PV Max</label>
+                                <input type="number" value="${player.stats.maxPv}" onchange="window.appActions.updateStat('${player.id}', 'maxPv', parseInt(this.value))" class="input-ghost text-xl font-bold text-green-500 w-full">
+                            </div>
+                        </div>
+
+                        <!-- Notes -->
+                        <div class="pt-4">
+                             <h4 class="text-xs text-slate-500 uppercase font-bold mb-2">Notes & Capacités</h4>
+                             <textarea onchange="window.appActions.updatePlayer('${player.id}', 'notes', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-300 text-sm h-32 focus:border-fantasy-gold outline-none resize-none">${player.notes}</textarea>
+                        </div>
+                    </div>
+
+                    <!-- Colonne Droite: Inventaire & Skills -->
+                    <div class="space-y-6">
+                        
+                        <!-- Compétences -->
+                        <div>
+                            <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Compétences</h3>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                ${player.skills.map(skill => `
+                                    <span class="bg-slate-800 text-slate-200 px-3 py-1 rounded-full text-sm border border-slate-600 flex items-center gap-2 group">
+                                        ${skill}
+                                        <button onclick="window.appActions.removeSkill('${player.id}', '${skill}')" class="text-slate-500 group-hover:text-red-400 transition-colors">&times;</button>
+                                    </span>
+                                `).join('')}
+                            </div>
+                            <form onsubmit="window.appActions.addSkill(event, '${player.id}')" class="flex gap-2">
+                                <input name="skillName" placeholder="Nouvelle compétence..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-fantasy-gold" required>
+                                <button type="submit" class="bg-slate-700 text-slate-300 px-4 py-2 rounded text-sm hover:bg-slate-600">Ajouter</button>
+                            </form>
+                        </div>
+
+                        <!-- Inventaire -->
+                        <div>
+                            <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Inventaire</h3>
+                            <div class="space-y-2 mb-4 max-h-60 overflow-y-auto pr-2">
+                                ${player.inventory.map(item => `
+                                    <div class="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-700/50 hover:border-slate-500 transition-colors">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-4 h-4 text-slate-500"></i>
+                                            <span class="text-slate-200 font-medium">${item.name}</span>
                                         </div>
-                                        <button onclick="window.appActions.deleteItem('${player.id}', '${item.id}')" class="text-red-900 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex items-center bg-slate-800 rounded border border-slate-700">
+                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', -1)" class="px-2 text-slate-400 hover:text-white">-</button>
+                                                <span class="w-6 text-center text-sm font-mono text-fantasy-gold">${item.qty}</span>
+                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', 1)" class="px-2 text-slate-400 hover:text-white">+</button>
+                                            </div>
+                                            <button onclick="window.appActions.deleteItem('${player.id}', '${item.id}')" class="text-slate-600 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        </div>
                                     </div>
-                                </div>
-                            `).join('')}
+                                `).join('')}
+                            </div>
+                            <form onsubmit="window.appActions.addItem(event, '${player.id}')" class="flex gap-2">
+                                <input name="itemName" placeholder="Ajouter objet..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-fantasy-gold" required>
+                                <button type="submit" class="bg-fantasy-gold text-white px-4 py-2 rounded text-sm hover:bg-yellow-600 font-bold">+</button>
+                            </form>
                         </div>
-                        <form onsubmit="window.appActions.addItem(event, '${player.id}')" class="flex gap-2">
-                            <input name="itemName" placeholder="Nouvel objet..." class="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1 text-sm text-white outline-none focus:border-fantasy-gold" required>
-                            <select name="itemType" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-300 outline-none">
-                                <option value="item">Objet</option>
-                                <option value="weapon">Arme</option>
-                            </select>
-                            <button type="submit" class="bg-fantasy-gold text-white px-3 py-1 rounded text-sm hover:bg-yellow-600">Ajouter</button>
-                        </form>
-                    </div>
-
-                    <!-- Section Compétences -->
-                    <div>
-                        <h3 class="text-sm font-bold text-fantasy-gold uppercase tracking-widest mb-3 border-b border-slate-700 pb-1">Compétences</h3>
-                        <div class="flex flex-wrap gap-2 mb-4">
-                            ${player.skills.map(skill => `
-                                <span class="bg-slate-800 text-slate-200 px-3 py-1 rounded-full text-sm border border-slate-600 flex items-center gap-2">
-                                    ${skill}
-                                    <button onclick="window.appActions.removeSkill('${player.id}', '${skill}')" class="text-slate-500 hover:text-red-400">&times;</button>
-                                </span>
-                            `).join('')}
-                        </div>
-                        <form onsubmit="window.appActions.addSkill(event, '${player.id}')" class="flex gap-2">
-                            <input name="skillName" placeholder="Nouvelle compétence..." class="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1 text-sm text-white outline-none focus:border-fantasy-gold" required>
-                            <button type="submit" class="bg-fantasy-panel border border-slate-500 text-slate-300 px-3 py-1 rounded text-sm hover:bg-slate-700">Ajouter</button>
-                        </form>
-                    </div>
-
-                    <!-- Notes -->
-                    <div>
-                         <h3 class="text-sm font-bold text-fantasy-gold uppercase tracking-widest mb-3 border-b border-slate-700 pb-1">Notes Publiques</h3>
-                         <textarea onchange="window.appActions.updatePlayer('${player.id}', 'notes', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-300 text-sm h-24 focus:border-fantasy-gold outline-none resize-none" placeholder="Notes visibles par tous...">${player.notes}</textarea>
                     </div>
                 </div>
              </div>
@@ -555,30 +669,28 @@
       // --- Actions ---
       window.appActions = {
         setView: (mode) => {
-            // Si on quitte le mode Focus, on reset la selection
             if(mode === 'PLAYER_SELECT') updateState({ viewMode: mode, selectedPlayerId: null });
             else updateState({ viewMode: mode });
         },
         toggleChat: () => updateState({ isChatOpen: !state.isChatOpen }),
-        
         selectPlayer: (id) => updateState({ selectedPlayerId: id, viewMode: 'PLAYER_FOCUS' }),
-        
         editPlayer: (id) => updateState({ editingPlayerId: id }),
         closeModal: () => updateState({ editingPlayerId: null }),
 
+        // Core Updates avec Tracking pour Animation
         updatePlayer: (id, field, value) => {
           const players = state.players.map(p => p.id === id ? { ...p, [field]: value } : p);
-          updateState({ players });
+          updateState({ players, lastUpdated: { id, field, time: Date.now() } });
         },
 
         updateStat: (id, stat, value) => {
           const players = state.players.map(p => {
              if (p.id !== id) return p;
              let newValue = value;
-             if (stat === 'pv') newValue = Math.min(p.stats.maxPv, Math.max(0, value));
+             if (stat === 'pv') newValue = Math.min(p.stats.maxPv, Math.max(0, value)); // Cap PV at MaxPV
              return { ...p, stats: { ...p.stats, [stat]: newValue } };
           });
-          updateState({ players });
+          updateState({ players, lastUpdated: { id, field: stat, time: Date.now() } });
         },
 
         addCondition: (id, condition) => {
@@ -611,32 +723,28 @@
         },
 
         addManualPlayer: () => {
-          const input = document.getElementById('newPlayerInput');
-          const name = input.value.trim();
-          if (!name) return;
+          const name = prompt("Nom du personnage ?") || "Nouveau";
           addPlayer({
-            id: crypto.randomUUID(), name, role: 'Inconnu', isNpc: true,
-            stats: { pv: 20, maxPv: 20, dex: 10, iniBase: 0, iniRoll: 0 },
+            id: crypto.randomUUID(), name, role: 'Classe', isNpc: false, level: 1, xp: 0,
+            stats: { pv: 10, maxPv: 10, ca: 10, iniBase: 0, iniRoll: 0, str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
             notes: '', conditions: [], skills: [], inventory: []
           });
-          input.value = '';
         },
         createNpc: generateNpc,
 
-        // Inventory & Skills Logic
         addItem: (e, playerId) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const newItem = {
                 id: crypto.randomUUID(),
                 name: formData.get('itemName'),
-                type: formData.get('itemType'),
+                type: 'item',
                 qty: 1
             };
             const players = state.players.map(p => p.id === playerId ? { ...p, inventory: [...p.inventory, newItem] } : p);
             updateState({ players });
             e.target.reset();
-            renderModal(); // Force refresh modal content
+            renderModal();
         },
         updateItemQty: (playerId, itemId, change) => {
             const players = state.players.map(p => {
@@ -644,7 +752,7 @@
                 const newInventory = p.inventory.map(i => {
                     if (i.id !== itemId) return i;
                     return { ...i, qty: Math.max(0, i.qty + change) };
-                }).filter(i => i.qty > 0); // Remove if 0 ? Maybe better keep 0. Let's keep 0 but remove via trash icon only.
+                }).filter(i => i.qty > 0);
                 return { ...p, inventory: newInventory };
             });
             updateState({ players });
@@ -673,25 +781,13 @@
             renderModal();
         },
 
-        // Chat
         sendChat: (e) => {
             e.preventDefault();
             const input = document.getElementById('chat-input');
             const text = input.value.trim();
             if(!text) return;
-            
-            // Check if asking AI
-            if (text.toLowerCase().startsWith('/ai') || text.toLowerCase().startsWith('/oracle') || state.viewMode === 'GM') {
-               // In GM mode, everything is assumed to be relevant to the game log, but let's make explicit calls to AI
-               // Simplified: If text starts with '?' call AI, otherwise Log.
-               if(text.startsWith('?')) {
-                   askAI(text.substring(1).trim());
-               } else {
-                   addChatMessage('user', text); // Juste un log
-               }
-            } else {
-               addChatMessage('user', text);
-            }
+            if(text.startsWith('?')) askAI(text.substring(1).trim());
+            else addChatMessage('user', text);
             input.value = '';
         }
       };
@@ -700,7 +796,6 @@
         updateState({ players: [...state.players, player] });
       }
 
-      // Initial Render
       render();
     </script>
 </body>
