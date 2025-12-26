@@ -79,6 +79,10 @@
         outline: none;
       }
 
+      .input-ghost-left {
+        text-align: left;
+      }
+
       .glass-panel {
         background: rgba(30, 41, 59, 0.95);
         backdrop-filter: blur(8px);
@@ -124,9 +128,10 @@
           notes: 'Rage disponible (2/jour)', conditions: [],
           skills: ['Athlétisme', 'Intimidation'],
           inventory: [
-            { id: 'i1', name: 'Hache à deux mains', type: 'weapon', qty: 1 },
+            { id: 'i1', name: 'Hache à deux mains', type: 'weapon', qty: 1, data: { atk: '+6', dmg: '1d12+4', crit: 'x3' } },
             { id: 'i2', name: 'Potion de Soin', type: 'item', qty: 2 }
-          ]
+          ],
+          spells: []
         },
         { 
           id: '2', name: 'Elara', role: 'Mage', isNpc: false, 
@@ -138,8 +143,12 @@
           notes: 'Sorts niv 2 débloqués', conditions: [],
           skills: ['Arcanes', 'Histoire'],
           inventory: [
-            { id: 'i3', name: 'Bâton runique', type: 'weapon', qty: 1 },
+            { id: 'i3', name: 'Bâton runique', type: 'weapon', qty: 1, data: { atk: '+2', dmg: '1d6', crit: 'x2' } },
             { id: 'i4', name: 'Parchemin vierge', type: 'item', qty: 5 }
+          ],
+          spells: [
+            { id: 's1', name: 'Projectile Magique', level: 1, desc: '3 fléchettes infaillibles', dmg: '3x(1d4+1)', effect: 'Force' },
+            { id: 's2', name: 'Bouclier', level: 1, desc: 'Réaction, +5 CA', dmg: '-', effect: 'Défense' }
           ]
         },
         { 
@@ -152,8 +161,9 @@
           notes: 'Lâche, fuit si PV < 5', conditions: [],
           skills: ['Discrétion'],
           inventory: [
-            { id: 'i5', name: 'Dague rouillée', type: 'weapon', qty: 1 }
-          ]
+            { id: 'i5', name: 'Dague rouillée', type: 'weapon', qty: 1, data: { atk: '+4', dmg: '1d4+2', crit: 'x2' } }
+          ],
+          spells: []
         }
       ];
 
@@ -235,7 +245,7 @@
                     str: npcData.stats?.str||10, dex: npcData.stats?.dex||10, con: npcData.stats?.con||10,
                     int: npcData.stats?.int||10, wis: npcData.stats?.wis||10, cha: npcData.stats?.cha||10
                 },
-                notes: '', conditions: [], skills: [], inventory: []
+                notes: '', conditions: [], skills: [], inventory: [], spells: []
              });
              addChatMessage('system', `Nouveau PNJ invoqué: ${npcData.name}`);
           }
@@ -477,7 +487,7 @@
         const isUpdated = (field) => state.lastUpdated.id === player.id && state.lastUpdated.field === field ? 'flash-update' : '';
 
         return `
-          <div class="max-w-md mx-auto h-full flex flex-col gap-6 animate-fade-in pb-10">
+          <div class="max-w-2xl mx-auto h-full flex flex-col gap-6 animate-fade-in pb-10">
              <button onclick="window.appActions.setView('PLAYER_SELECT')" class="text-slate-500 hover:text-white flex items-center gap-2 text-sm uppercase font-bold tracking-widest mb-4">
                 <i data-lucide="arrow-left" class="w-4 h-4"></i> Retour
              </button>
@@ -513,28 +523,58 @@
                 </div>
              </div>
 
-             <!-- Caractéristiques Grid -->
-             <div class="grid grid-cols-3 gap-3">
-                ${['str', 'dex', 'con', 'int', 'wis', 'cha'].map(stat => `
-                    <div class="bg-fantasy-panel border border-slate-700 rounded p-2 text-center ${isUpdated(stat)}">
-                        <div class="text-[10px] text-slate-500 uppercase mb-1">${stat.toUpperCase()}</div>
-                        <div class="text-lg font-bold text-white">${player.stats[stat]}</div>
-                    </div>
-                `).join('')}
-             </div>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Inventaire & Armes -->
+                <div class="bg-fantasy-panel rounded-xl border border-slate-700 p-4">
+                    <h3 class="text-fantasy-gold text-xs font-bold uppercase mb-4 flex items-center gap-2 border-b border-slate-700 pb-2">
+                        <i data-lucide="sword" class="w-4 h-4"></i> Armement & Sac
+                    </h3>
+                    <ul class="space-y-4">
+                    ${player.inventory.map(item => `
+                        <li class="border-b border-slate-800 pb-2 last:border-0">
+                            <div class="flex justify-between items-center text-slate-300 mb-1">
+                                <span class="font-bold flex items-center gap-2">
+                                    <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-3 h-3 text-slate-500"></i>
+                                    ${item.name}
+                                </span>
+                                <span class="font-mono text-fantasy-gold text-xs">x${item.qty}</span>
+                            </div>
+                            ${item.type === 'weapon' && item.data ? `
+                            <div class="grid grid-cols-3 gap-1 text-[10px] text-center bg-slate-900/50 rounded p-1">
+                                <div><span class="text-slate-500 block">ATK</span><span class="text-green-400 font-bold">${item.data.atk || '-'}</span></div>
+                                <div><span class="text-slate-500 block">DMG</span><span class="text-red-400 font-bold">${item.data.dmg || '-'}</span></div>
+                                <div><span class="text-slate-500 block">CRIT</span><span class="text-yellow-500 font-bold">${item.data.crit || '-'}</span></div>
+                            </div>
+                            ` : ''}
+                        </li>
+                    `).join('')}
+                    </ul>
+                </div>
 
-             <!-- Inventaire Succinct -->
-             <div class="bg-fantasy-panel rounded-xl border border-slate-700 p-4 flex-1">
-                <h3 class="text-slate-400 text-xs font-bold uppercase mb-4 flex items-center gap-2"><i data-lucide="backpack" class="w-4 h-4"></i> Inventaire</h3>
-                <ul class="space-y-3">
-                   ${player.inventory.length === 0 ? '<li class="text-slate-600 italic text-sm text-center py-4">Sac vide...</li>' : ''}
-                   ${player.inventory.map(item => `
-                     <li class="flex justify-between items-center text-slate-300 border-b border-slate-800 pb-2 last:border-0">
-                        <span>${item.name}</span>
-                        <span class="font-mono text-fantasy-gold font-bold">x${item.qty}</span>
-                     </li>
-                   `).join('')}
-                </ul>
+                <!-- Grimoire -->
+                <div class="bg-fantasy-panel rounded-xl border border-slate-700 p-4">
+                    <h3 class="text-fantasy-gold text-xs font-bold uppercase mb-4 flex items-center gap-2 border-b border-slate-700 pb-2">
+                        <i data-lucide="book" class="w-4 h-4"></i> Grimoire
+                    </h3>
+                     ${player.spells && player.spells.length > 0 ? `
+                        <ul class="space-y-3">
+                            ${player.spells.map(spell => `
+                            <li class="bg-slate-900/30 p-2 rounded border border-slate-700/30">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-white font-bold text-sm">${spell.name}</span>
+                                    <span class="text-[10px] bg-indigo-900 text-indigo-200 px-1.5 rounded">Niv ${spell.level}</span>
+                                </div>
+                                <div class="text-xs text-slate-400 italic mb-1">${spell.desc}</div>
+                                <div class="flex gap-2 text-[10px]">
+                                    <span class="text-red-400">Deg: ${spell.dmg}</span>
+                                    <span class="text-slate-500">|</span>
+                                    <span class="text-blue-400">Effet: ${spell.effect}</span>
+                                </div>
+                            </li>
+                            `).join('')}
+                        </ul>
+                     ` : '<div class="text-slate-600 text-sm italic text-center">Aucun sort connu</div>'}
+                </div>
              </div>
           </div>
         `;
@@ -562,7 +602,7 @@
 
         container.innerHTML = `
           <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-             <div class="bg-fantasy-panel w-full max-w-4xl max-h-[95vh] overflow-hidden rounded-xl border border-slate-600 shadow-2xl flex flex-col">
+             <div class="bg-fantasy-panel w-full max-w-5xl max-h-[95vh] overflow-hidden rounded-xl border border-slate-600 shadow-2xl flex flex-col">
                 <!-- Header: Identité -->
                 <div class="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-start">
                     <div class="flex-1 mr-8">
@@ -580,86 +620,132 @@
                     <button onclick="window.appActions.closeModal()" class="text-slate-400 hover:text-white p-2 bg-slate-700 rounded-full"><i data-lucide="x" class="w-6 h-6"></i></button>
                 </div>
 
-                <div class="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                     
-                    <!-- Colonne Gauche: Stats Combat -->
-                    <div class="space-y-6">
-                        <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2">Caractéristiques & Combat</h3>
+                    <!-- Colonne Gauche: Stats Combat (4 cols) -->
+                    <div class="lg:col-span-4 space-y-6">
+                        <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2">Caractéristiques</h3>
                         
-                        <!-- Main Stats Grid -->
-                        <div class="grid grid-cols-3 gap-3">
-                            ${statInput('Force', 'str')}
-                            ${statInput('Dextérité', 'dex')}
-                            ${statInput('Constit.', 'con')}
-                            ${statInput('Intell.', 'int')}
-                            ${statInput('Sagesse', 'wis')}
-                            ${statInput('Charisme', 'cha')}
+                        <div class="grid grid-cols-3 gap-2">
+                            ${statInput('FOR', 'str')}
+                            ${statInput('DEX', 'dex')}
+                            ${statInput('CON', 'con')}
+                            ${statInput('INT', 'int')}
+                            ${statInput('SAG', 'wis')}
+                            ${statInput('CHA', 'cha')}
                         </div>
 
-                        <!-- Secondary Stats -->
-                        <div class="grid grid-cols-3 gap-3 pt-4">
-                            ${statInput('CA (Armure)', 'ca')}
-                            ${statInput('Ini. Base', 'iniBase')}
+                        <div class="grid grid-cols-3 gap-2 pt-2">
+                            ${statInput('CA', 'ca')}
+                            ${statInput('INI', 'iniBase')}
                             <div class="bg-slate-900 p-2 rounded border border-slate-700 flex flex-col items-center relative overflow-hidden">
                                 <label class="text-[10px] text-slate-500 uppercase font-bold mb-1">PV Max</label>
                                 <input type="number" value="${player.stats.maxPv}" onchange="window.appActions.updateStat('${player.id}', 'maxPv', parseInt(this.value))" class="input-ghost text-xl font-bold text-green-500 w-full">
                             </div>
                         </div>
 
-                        <!-- Notes -->
                         <div class="pt-4">
-                             <h4 class="text-xs text-slate-500 uppercase font-bold mb-2">Notes & Capacités</h4>
-                             <textarea onchange="window.appActions.updatePlayer('${player.id}', 'notes', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-300 text-sm h-32 focus:border-fantasy-gold outline-none resize-none">${player.notes}</textarea>
-                        </div>
-                    </div>
-
-                    <!-- Colonne Droite: Inventaire & Skills -->
-                    <div class="space-y-6">
-                        
-                        <!-- Compétences -->
-                        <div>
-                            <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Compétences</h3>
-                            <div class="flex flex-wrap gap-2 mb-3">
+                             <h4 class="text-xs text-slate-500 uppercase font-bold mb-2">Compétences</h4>
+                             <div class="flex flex-wrap gap-2 mb-3">
                                 ${player.skills.map(skill => `
-                                    <span class="bg-slate-800 text-slate-200 px-3 py-1 rounded-full text-sm border border-slate-600 flex items-center gap-2 group">
+                                    <span class="bg-slate-800 text-slate-200 px-3 py-1 rounded-full text-xs border border-slate-600 flex items-center gap-2 group">
                                         ${skill}
                                         <button onclick="window.appActions.removeSkill('${player.id}', '${skill}')" class="text-slate-500 group-hover:text-red-400 transition-colors">&times;</button>
                                     </span>
                                 `).join('')}
                             </div>
-                            <form onsubmit="window.appActions.addSkill(event, '${player.id}')" class="flex gap-2">
-                                <input name="skillName" placeholder="Nouvelle compétence..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-fantasy-gold" required>
-                                <button type="submit" class="bg-slate-700 text-slate-300 px-4 py-2 rounded text-sm hover:bg-slate-600">Ajouter</button>
+                             <form onsubmit="window.appActions.addSkill(event, '${player.id}')" class="flex gap-2">
+                                <input name="skillName" placeholder="+ Compétence" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-fantasy-gold" required>
+                                <button type="submit" class="bg-slate-700 text-slate-300 px-2 py-1 rounded text-xs hover:bg-slate-600">+</button>
                             </form>
                         </div>
 
-                        <!-- Inventaire -->
-                        <div>
-                            <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Inventaire</h3>
-                            <div class="space-y-2 mb-4 max-h-60 overflow-y-auto pr-2">
-                                ${player.inventory.map(item => `
-                                    <div class="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-700/50 hover:border-slate-500 transition-colors">
-                                        <div class="flex items-center gap-2">
-                                            <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-4 h-4 text-slate-500"></i>
-                                            <span class="text-slate-200 font-medium">${item.name}</span>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <div class="flex items-center bg-slate-800 rounded border border-slate-700">
-                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', -1)" class="px-2 text-slate-400 hover:text-white">-</button>
-                                                <span class="w-6 text-center text-sm font-mono text-fantasy-gold">${item.qty}</span>
-                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', 1)" class="px-2 text-slate-400 hover:text-white">+</button>
-                                            </div>
-                                            <button onclick="window.appActions.deleteItem('${player.id}', '${item.id}')" class="text-slate-600 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                            <form onsubmit="window.appActions.addItem(event, '${player.id}')" class="flex gap-2">
-                                <input name="itemName" placeholder="Ajouter objet..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-fantasy-gold" required>
-                                <button type="submit" class="bg-fantasy-gold text-white px-4 py-2 rounded text-sm hover:bg-yellow-600 font-bold">+</button>
-                            </form>
+                        <div class="pt-2">
+                             <h4 class="text-xs text-slate-500 uppercase font-bold mb-2">Notes</h4>
+                             <textarea onchange="window.appActions.updatePlayer('${player.id}', 'notes', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-300 text-xs h-24 focus:border-fantasy-gold outline-none resize-none">${player.notes}</textarea>
                         </div>
                     </div>
+
+                    <!-- Colonne Centre: Inventaire & Armes (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full">
+                        <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Inventaire & Armes</h3>
+                        <div class="flex-1 overflow-y-auto space-y-3 pr-2 mb-4 max-h-[500px]">
+                            ${player.inventory.map(item => `
+                                <div class="bg-slate-900 p-3 rounded border border-slate-700/50 hover:border-slate-500 transition-colors group">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="${item.type === 'weapon' ? 'sword' : 'package'}" class="w-4 h-4 text-slate-500"></i>
+                                            <input value="${item.name}" onchange="window.appActions.updateItemField('${player.id}', '${item.id}', 'name', this.value)" class="input-ghost-left bg-transparent text-slate-200 font-medium text-sm w-32 outline-none">
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <div class="flex items-center bg-slate-800 rounded border border-slate-700">
+                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', -1)" class="px-1.5 text-slate-400 hover:text-white">-</button>
+                                                <span class="w-6 text-center text-xs font-mono text-fantasy-gold">${item.qty}</span>
+                                                <button onclick="window.appActions.updateItemQty('${player.id}', '${item.id}', 1)" class="px-1.5 text-slate-400 hover:text-white">+</button>
+                                            </div>
+                                            <button onclick="window.appActions.deleteItem('${player.id}', '${item.id}')" class="text-slate-600 hover:text-red-500"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                                        </div>
+                                    </div>
+                                    ${item.type === 'weapon' ? `
+                                    <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800 mt-2">
+                                        <div>
+                                            <label class="text-[9px] text-slate-500 block uppercase">ATK</label>
+                                            <input placeholder="+0" value="${item.data?.atk || ''}" onchange="window.appActions.updateItemData('${player.id}', '${item.id}', 'atk', this.value)" class="w-full bg-slate-800 text-green-400 text-xs rounded px-1 text-center outline-none focus:ring-1 ring-fantasy-gold">
+                                        </div>
+                                        <div>
+                                            <label class="text-[9px] text-slate-500 block uppercase">DMG</label>
+                                            <input placeholder="1d6" value="${item.data?.dmg || ''}" onchange="window.appActions.updateItemData('${player.id}', '${item.id}', 'dmg', this.value)" class="w-full bg-slate-800 text-red-400 text-xs rounded px-1 text-center outline-none focus:ring-1 ring-fantasy-gold">
+                                        </div>
+                                        <div>
+                                            <label class="text-[9px] text-slate-500 block uppercase">CRIT</label>
+                                            <input placeholder="x2" value="${item.data?.crit || ''}" onchange="window.appActions.updateItemData('${player.id}', '${item.id}', 'crit', this.value)" class="w-full bg-slate-800 text-yellow-500 text-xs rounded px-1 text-center outline-none focus:ring-1 ring-fantasy-gold">
+                                        </div>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                        <form onsubmit="window.appActions.addItem(event, '${player.id}')" class="flex gap-2">
+                            <input name="itemName" placeholder="Nouvel objet..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white outline-none focus:border-fantasy-gold" required>
+                            <select name="itemType" class="bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded outline-none">
+                                <option value="item">Objet</option>
+                                <option value="weapon">Arme</option>
+                            </select>
+                            <button type="submit" class="bg-fantasy-gold text-white px-3 py-2 rounded text-sm hover:bg-yellow-600 font-bold">+</button>
+                        </form>
+                    </div>
+
+                    <!-- Colonne Droite: Grimoire (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full">
+                        <h3 class="text-fantasy-gold font-bold uppercase tracking-widest text-sm border-b border-slate-700 pb-2 mb-3">Grimoire & Sorts</h3>
+                        <div class="flex-1 overflow-y-auto space-y-3 pr-2 mb-4 max-h-[500px]">
+                            ${(player.spells || []).map(spell => `
+                                <div class="bg-slate-900 p-3 rounded border border-slate-700/50 hover:border-slate-500 transition-colors">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div class="flex-1 mr-2">
+                                            <input value="${spell.name}" onchange="window.appActions.updateSpell('${player.id}', '${spell.id}', 'name', this.value)" class="bg-transparent text-white font-bold text-sm w-full outline-none placeholder-slate-600" placeholder="Nom du sort">
+                                        </div>
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-[10px] text-slate-500">Niv</span>
+                                            <input type="number" value="${spell.level}" onchange="window.appActions.updateSpell('${player.id}', '${spell.id}', 'level', parseInt(this.value))" class="bg-slate-800 text-indigo-300 w-8 text-center text-xs rounded outline-none">
+                                            <button onclick="window.appActions.removeSpell('${player.id}', '${spell.id}')" class="text-slate-600 hover:text-red-500 ml-1"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <textarea onchange="window.appActions.updateSpell('${player.id}', '${spell.id}', 'desc', this.value)" class="w-full bg-slate-800/50 text-slate-400 text-xs rounded p-1 outline-none resize-none h-12 placeholder-slate-600" placeholder="Description/Effet...">${spell.desc}</textarea>
+                                        <div class="flex gap-2">
+                                            <input value="${spell.dmg}" onchange="window.appActions.updateSpell('${player.id}', '${spell.id}', 'dmg', this.value)" class="flex-1 bg-slate-800 text-red-300 text-xs rounded px-2 py-1 outline-none placeholder-slate-600" placeholder="Dégâts (ex: 3d6)">
+                                            <input value="${spell.effect}" onchange="window.appActions.updateSpell('${player.id}', '${spell.id}', 'effect', this.value)" class="flex-1 bg-slate-800 text-blue-300 text-xs rounded px-2 py-1 outline-none placeholder-slate-600" placeholder="Type/Sauvegarde">
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button onclick="window.appActions.addSpell('${player.id}')" class="bg-slate-800 border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 w-full py-2 rounded text-sm transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Ajouter un sort
+                        </button>
+                    </div>
+
                 </div>
              </div>
           </div>
@@ -727,7 +813,7 @@
           addPlayer({
             id: crypto.randomUUID(), name, role: 'Classe', isNpc: false, level: 1, xp: 0,
             stats: { pv: 10, maxPv: 10, ca: 10, iniBase: 0, iniRoll: 0, str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
-            notes: '', conditions: [], skills: [], inventory: []
+            notes: '', conditions: [], skills: [], inventory: [], spells: []
           });
         },
         createNpc: generateNpc,
@@ -735,11 +821,13 @@
         addItem: (e, playerId) => {
             e.preventDefault();
             const formData = new FormData(e.target);
+            const type = formData.get('itemType');
             const newItem = {
                 id: crypto.randomUUID(),
                 name: formData.get('itemName'),
-                type: 'item',
-                qty: 1
+                type: type,
+                qty: 1,
+                data: type === 'weapon' ? { atk: '', dmg: '', crit: '' } : {}
             };
             const players = state.players.map(p => p.id === playerId ? { ...p, inventory: [...p.inventory, newItem] } : p);
             updateState({ players });
@@ -757,6 +845,47 @@
             });
             updateState({ players });
             renderModal();
+        },
+        updateItemField: (playerId, itemId, field, value) => {
+            const players = state.players.map(p => {
+                if (p.id !== playerId) return p;
+                const newInventory = p.inventory.map(i => i.id === itemId ? { ...i, [field]: value } : i);
+                return { ...p, inventory: newInventory };
+            });
+            updateState({ players });
+            // Don't re-render modal fully if typing to keep focus? 
+            // Actually re-rendering modal might lose focus. Let's rely on simple updateState but we need to keep focus.
+            // For now, the implementation does re-render. Ideally we should optimize.
+        },
+        updateItemData: (playerId, itemId, key, value) => {
+            const players = state.players.map(p => {
+                if (p.id !== playerId) return p;
+                const newInventory = p.inventory.map(i => {
+                    if (i.id !== itemId) return i;
+                    return { ...i, data: { ...i.data, [key]: value } };
+                });
+                return { ...p, inventory: newInventory };
+            });
+            // Update state without full modal re-render to allow typing? 
+            // state update triggers render() which triggers renderModal().
+            // This causes focus loss.
+            // FIX: We update state silently or use a different mechanism?
+            // For this quick prototype, we updateState. The focus loss is an issue.
+            // Let's NOT call updateState on every keystroke if possible, OR, we need to handle focus.
+            // The simplest fix for "Vanilla JS" reactivity without VDOM is difficult.
+            // However, the previous 'input-ghost' worked because render happened.
+            // I will update the state variable `state` directly but NOT call `render()` for these specific inputs, 
+            // since the input value is already updated by the user typing in it.
+            // We only need to persist it to state.
+            
+            // Hacky fix for focus loss in Vanilla JS:
+            const player = state.players.find(p => p.id === playerId);
+            const item = player.inventory.find(i => i.id === itemId);
+            if(item) {
+                if(!item.data) item.data = {};
+                item.data[key] = value;
+            }
+            // We do NOT call updateState({}) here to avoid re-render.
         },
         deleteItem: (playerId, itemId) => {
             const players = state.players.map(p => {
@@ -779,6 +908,26 @@
             const players = state.players.map(p => p.id === playerId ? { ...p, skills: p.skills.filter(s => s !== skillName) } : p);
             updateState({ players });
             renderModal();
+        },
+        
+        // Spell Actions
+        addSpell: (playerId) => {
+            const newSpell = { id: crypto.randomUUID(), name: '', level: 1, desc: '', dmg: '', effect: '' };
+            const players = state.players.map(p => p.id === playerId ? { ...p, spells: [...(p.spells||[]), newSpell] } : p);
+            updateState({ players });
+            renderModal();
+        },
+        updateSpell: (playerId, spellId, field, value) => {
+            // Same focus optimization: modify state directly
+             const player = state.players.find(p => p.id === playerId);
+             const spell = player.spells.find(s => s.id === spellId);
+             if(spell) spell[field] = value;
+             // No render call
+        },
+        removeSpell: (playerId, spellId) => {
+             const players = state.players.map(p => p.id === playerId ? { ...p, spells: p.spells.filter(s => s.id !== spellId) } : p);
+             updateState({ players });
+             renderModal();
         },
 
         sendChat: (e) => {
